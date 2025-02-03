@@ -26,7 +26,9 @@ local P = require("avante.providers")
 ---
 ---@class OpenAIMessage
 ---@field role? "user" | "system" | "assistant"
----@field content string
+---@field content? string
+---@field reasoning_content? string
+---@field reasoning? string
 ---
 ---@class AvanteProviderFunctor
 local M = {}
@@ -37,6 +39,8 @@ M.role_map = {
   user = "user",
   assistant = "assistant",
 }
+
+M.is_openrouter = function(url) return url:match("^https://openrouter%.ai/") end
 
 ---@param opts AvantePromptOptions
 M.get_user_message = function(opts)
@@ -106,19 +110,47 @@ M.parse_messages = function(opts)
   return final_messages
 end
 
-M.parse_response = function(data_stream, _, opts)
+M.parse_response = function(ctx, data_stream, _, opts)
   if data_stream:match('"%[DONE%]":') then
     opts.on_complete(nil)
     return
   end
   if data_stream:match('"delta":') then
     ---@type OpenAIChatResponse
-    local json = vim.json.decode(data_stream)
-    if json.choices and json.choices[1] then
-      local choice = json.choices[1]
+    local jsn = vim.json.decode(data_stream)
+    if jsn.choices and jsn.choices[1] then
+      local choice = jsn.choices[1]
       if choice.finish_reason == "stop" or choice.finish_reason == "eos_token" then
         opts.on_complete(nil)
+      elseif choice.delta.reasoning_content and choice.delta.reasoning_content ~= vim.NIL then
+        if ctx.returned_think_start_tag == nil or not ctx.returned_think_start_tag then
+          ctx.returned_think_start_tag = true
+          opts.on_chunk("<think>\n")
+        end
+        ctx.last_think_content = choice.delta.reasoning_content
+        opts.on_chunk(choice.delta.reasoning_content)
+      elseif choice.delta.reasoning and choice.delta.reasoning ~= vim.NIL then
+        if ctx.returned_think_start_tag == nil or not ctx.returned_think_start_tag then
+          ctx.returned_think_start_tag = true
+          opts.on_chunk("<think>\n")
+        end
+        ctx.last_think_content = choice.delta.reasoning
+        opts.on_chunk(choice.delta.reasoning)
       elseif choice.delta.content then
+        if
+          ctx.returned_think_start_tag ~= nil and (ctx.returned_think_end_tag == nil or not ctx.returned_think_end_tag)
+        then
+          ctx.returned_think_end_tag = true
+          if
+            ctx.last_think_content
+            and ctx.last_think_content ~= vim.NIL
+            and ctx.last_think_content:sub(-1) ~= "\n"
+          then
+            opts.on_chunk("\n</think>\n")
+          else
+            opts.on_chunk("</think>\n")
+          end
+        end
         if choice.delta.content ~= vim.NIL then opts.on_chunk(choice.delta.content) end
       end
     end
@@ -150,6 +182,12 @@ M.parse_curl_args = function(provider, code_opts)
       error(Config.provider .. " API key is not set, please set it in your environment variable or config file")
     end
     headers["Authorization"] = "Bearer " .. api_key
+  end
+
+  if M.is_openrouter(base.endpoint) then
+    headers["HTTP-Referer"] = "https://github.com/yetone/avante.nvim"
+    headers["X-Title"] = "Avante.nvim"
+    body_opts.include_reasoning = true
   end
 
   -- NOTE: When using "o" series set the supported parameters only

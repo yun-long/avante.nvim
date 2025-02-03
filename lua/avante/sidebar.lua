@@ -170,11 +170,15 @@ end
 ---@field current_filepath string
 ---@field is_searching boolean
 ---@field is_replacing boolean
+---@field is_thinking boolean
 ---@field last_search_tag_start_line integer
 ---@field last_replace_tag_start_line integer
+---@field last_think_tag_start_line integer
+---@field last_think_tag_end_line integer
 
 ---@param selected_files {path: string, content: string, file_type: string | nil}[]
 ---@param result_content string
+---@param prev_filepath string
 ---@return AvanteReplacementResult
 local function transform_result_content(selected_files, result_content, prev_filepath)
   local transformed_lines = {}
@@ -183,8 +187,11 @@ local function transform_result_content(selected_files, result_content, prev_fil
 
   local is_searching = false
   local is_replacing = false
+  local is_thinking = false
   local last_search_tag_start_line = 0
   local last_replace_tag_start_line = 0
+  local last_think_tag_start_line = 0
+  local last_think_tag_end_line = 0
 
   local search_start = 0
 
@@ -286,6 +293,12 @@ local function transform_result_content(selected_files, result_content, prev_fil
       local prev_line = result_lines[i - 1]
       if not (prev_line and prev_line:match("^%s*```$")) then table.insert(transformed_lines, "```") end
       goto continue
+    elseif line_content == "<think>" then
+      is_thinking = true
+      last_think_tag_start_line = i
+    elseif line_content == "</think>" then
+      is_thinking = false
+      last_think_tag_end_line = i
     end
     table.insert(transformed_lines, line_content)
     ::continue::
@@ -297,8 +310,11 @@ local function transform_result_content(selected_files, result_content, prev_fil
     content = table.concat(transformed_lines, "\n"),
     is_searching = is_searching,
     is_replacing = is_replacing,
+    is_thinking = is_thinking,
     last_search_tag_start_line = last_search_tag_start_line,
     last_replace_tag_start_line = last_replace_tag_start_line,
+    last_think_tag_start_line = last_think_tag_start_line,
+    last_think_tag_end_line = last_think_tag_end_line,
   }
 end
 
@@ -351,8 +367,22 @@ local function get_searching_hint()
   return "\n" .. spinner .. " Searching..."
 end
 
+local thinking_spinner_chars = {
+  "🤯",
+  "🙄",
+}
+local thinking_spinner_index = 1
+
+local function get_thinking_spinner()
+  thinking_spinner_index = thinking_spinner_index + 1
+  if thinking_spinner_index > #thinking_spinner_chars then thinking_spinner_index = 1 end
+  local spinner = thinking_spinner_chars[thinking_spinner_index]
+  return "\n\n" .. spinner .. " Thinking..."
+end
+
 local function get_display_content_suffix(replacement)
   if replacement.is_searching then return get_searching_hint() end
+  if replacement.is_thinking then return get_thinking_spinner() end
   return ""
 end
 
@@ -364,6 +394,25 @@ local function generate_display_content(replacement)
       vim.list_slice(vim.split(replacement.content, "\n"), 1, replacement.last_search_tag_start_line - 1),
       "\n"
     )
+  end
+  if replacement.last_think_tag_start_line > 0 then
+    local lines = vim.split(replacement.content, "\n")
+    local last_think_tag_end_line = replacement.last_think_tag_end_line
+    if last_think_tag_end_line == 0 then last_think_tag_end_line = #lines + 1 end
+    local thinking_content_lines =
+      vim.list_slice(lines, replacement.last_think_tag_start_line + 2, last_think_tag_end_line - 1)
+    local formatted_thinking_content_lines = vim
+      .iter(thinking_content_lines)
+      :map(function(line)
+        if Utils.trim_spaces(line) == "" then return line end
+        return string.format("  > %s", line)
+      end)
+      :totable()
+    local result_lines =
+      vim.list_extend(vim.list_slice(lines, 1, replacement.last_search_tag_start_line), { "🤔 Thought content:" })
+    result_lines = vim.list_extend(result_lines, formatted_thinking_content_lines)
+    result_lines = vim.list_extend(result_lines, vim.list_slice(lines, last_think_tag_end_line + 1))
+    return table.concat(result_lines, "\n")
   end
   return replacement.content
 end
@@ -1727,10 +1776,12 @@ function Sidebar:create_input_container(opts)
 
     ---@type AvanteCompleteParser
     local on_complete = function(err)
-      ---remove keymaps
-      vim.keymap.del("n", "j", { buffer = self.result_container.bufnr })
-      vim.keymap.del("n", "k", { buffer = self.result_container.bufnr })
-      vim.keymap.del("n", "G", { buffer = self.result_container.bufnr })
+      pcall(function()
+        ---remove keymaps
+        vim.keymap.del("n", "j", { buffer = self.result_container.bufnr })
+        vim.keymap.del("n", "k", { buffer = self.result_container.bufnr })
+        vim.keymap.del("n", "G", { buffer = self.result_container.bufnr })
+      end)
 
       if err ~= nil then
         self:update_content(
@@ -1926,16 +1977,15 @@ function Sidebar:create_input_container(opts)
   local function show_hint()
     close_hint() -- Close the existing hint window
 
-    local input_value = table.concat(api.nvim_buf_get_lines(self.input_container.bufnr, 0, -1, false), "\n")
-
-    local generate_prompts_options = get_generate_prompts_options(input_value)
-    local tokens = Llm.calculate_tokens(generate_prompts_options)
-
-    local hint_text = "Tokens: "
-      .. tostring(tokens)
-      .. "; "
-      .. (fn.mode() ~= "i" and Config.mappings.submit.normal or Config.mappings.submit.insert)
+    local hint_text = (fn.mode() ~= "i" and Config.mappings.submit.normal or Config.mappings.submit.insert)
       .. ": submit"
+
+    if Config.behaviour.enable_token_counting then
+      local input_value = table.concat(api.nvim_buf_get_lines(self.input_container.bufnr, 0, -1, false), "\n")
+      local generate_prompts_options = get_generate_prompts_options(input_value)
+      local tokens = Llm.calculate_tokens(generate_prompts_options)
+      hint_text = "Tokens: " .. tostring(tokens) .. "; " .. hint_text
+    end
 
     local buf = api.nvim_create_buf(false, true)
     api.nvim_buf_set_lines(buf, 0, -1, false, { hint_text })
@@ -2084,12 +2134,7 @@ function Sidebar:render(opts)
     xpcall(function() api.nvim_buf_set_name(self.result_container.bufnr, RESULT_BUF_NAME) end, function(_) end)
   end)
 
-  self.result_container:map("n", "q", function()
-    Llm.cancel_inflight_request()
-    self:close()
-  end)
-
-  self.result_container:map("n", "<Esc>", function()
+  self.result_container:map("n", Config.mappings.sidebar.close, function()
     Llm.cancel_inflight_request()
     self:close()
   end)

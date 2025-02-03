@@ -52,6 +52,15 @@ For building binary if you wish to build from source, then `cargo` is required. 
   version = false, -- Set this to "*" to always pull the latest release version, or set it to false to update to the latest code changes.
   opts = {
     -- add any opts here
+    -- for example
+    provider = "openai",
+    openai = {
+      endpoint = "https://api.openai.com/v1",
+      model = "gpt-4o", -- your desired model (or use gpt-4o, etc.)
+      timeout = 30000, -- timeout in milliseconds
+      temperature = 0, -- adjust if needed
+      max_tokens = 4096,
+    },
   },
   -- if you want to build from source then do `make BUILD_FROM_SOURCE=true`
   build = "make",
@@ -246,6 +255,7 @@ _See [config.lua#L9](./lua/avante/config.lua) for the full config_
     auto_apply_diff_after_generation = false,
     support_paste_from_clipboard = false,
     minimize_diff = true, -- Whether to remove unchanged lines when applying a code block
+    enable_token_counting = true, -- Whether to enable token counting. Default to true.
   },
   mappings = {
     --- @class AvanteConflictMappings
@@ -337,7 +347,7 @@ This is achieved but emulating nvim-cmp using blink.compat
 
 ```lua
       file_selector = {
-        --- @alias FileSelectorProvider "native" | "fzf" | "mini.pick" | "telescope" | string
+        --- @alias FileSelectorProvider "native" | "fzf" | "mini.pick" | "snacks" | "telescope" | string
         provider = "fzf",
         -- Options override for custom providers
         provider_opts = {},
@@ -424,6 +434,12 @@ Given its early stage, `avante.nvim` currently supports the following basic func
 > ```sh
 > export AZURE_OPENAI_API_KEY=your-api-key
 > ```
+>
+> For Amazon Bedrock:
+>
+> ```sh
+> export BEDROCK_KEYS=aws_access_key_id,aws_secret_access_key,aws_region
+> ```
 
 1. Open a code file in Neovim.
 2. Use the `:AvanteAsk` command to query the AI about the code.
@@ -490,6 +506,12 @@ The following key bindings are available for use with `avante.nvim`:
 | AvanteInlineHint            | The end-of-line hint displayed in visual mode |                                              |
 
 See [highlights.lua](./lua/avante/highlights.lua) for more information
+
+## Custom providers
+
+Avante provides a set of default providers, but users can also create their own providers.
+
+For more information, see [Custom Providers](https://github.com/yetone/avante.nvim/wiki/Custom-providers)
 
 ## Custom prompts
 

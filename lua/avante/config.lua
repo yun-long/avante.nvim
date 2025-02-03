@@ -10,6 +10,9 @@ M._defaults = {
   debug = false,
   ---@alias Provider "claude" | "openai" | "azure" | "gemini" | "vertex" | "cohere" | "copilot" | string
   provider = "claude", -- Only recommend using Claude
+  -- WARNING: Since auto-suggestions are a high-frequency operation and therefore expensive,
+  -- currently designating it as `copilot` provider is dangerous because: https://github.com/yetone/avante.nvim/issues/1048
+  -- Of course, you can reduce the request frequency by increasing `suggestion.debounce`.
   auto_suggestions_provider = "claude",
   ---@alias Tokenizer "tiktoken" | "hf"
   -- Used for counting tokens and encoding text.
@@ -48,6 +51,13 @@ M._defaults = {
   claude = {
     endpoint = "https://api.anthropic.com",
     model = "claude-3-5-sonnet-20241022",
+    timeout = 30000, -- Timeout in milliseconds
+    temperature = 0,
+    max_tokens = 8000,
+  },
+  ---@type AvanteSupportedProvider
+  bedrock = {
+    model = "anthropic.claude-3-5-sonnet-20240620-v1:0",
     timeout = 30000, -- Timeout in milliseconds
     temperature = 0,
     max_tokens = 8000,
@@ -124,6 +134,7 @@ M._defaults = {
   ---6. jump_to_result_buffer_on_finish = false, -- Whether to automatically jump to the result buffer after generation
   ---7. support_paste_from_clipboard    : Whether to support pasting image from clipboard. This will be determined automatically based whether img-clip is available or not.
   ---8. minimize_diff                   : Whether to remove unchanged lines when applying a code block
+  ---9. enable_token_counting           : Whether to enable token counting. Default to true.
   behaviour = {
     auto_focus_sidebar = true,
     auto_suggestions = false, -- Experimental stage
@@ -134,6 +145,7 @@ M._defaults = {
     jump_result_buffer_on_finish = false,
     support_paste_from_clipboard = false,
     minimize_diff = true,
+    enable_token_counting = true,
   },
   history = {
     max_tokens = 4096,
@@ -194,6 +206,7 @@ M._defaults = {
       reverse_switch_windows = "<S-Tab>",
       remove_file = "d",
       add_file = "@",
+      close = { "<Esc>", "q" },
     },
     files = {
       add_current = "<leader>ac", -- Add current buffer to selected files
@@ -245,7 +258,7 @@ M._defaults = {
   },
   --- @class AvanteFileSelectorConfig
   file_selector = {
-    --- @alias FileSelectorProvider "native" | "fzf" | "mini.pick" | "telescope" | string
+    --- @alias FileSelectorProvider "native" | "fzf" | "mini.pick" | "snacks" | "telescope" | string
     provider = "native",
     -- Options override for custom providers
     provider_opts = {},
@@ -282,13 +295,6 @@ function M.setup(opts)
       },
     }
   )
-
-  -- Check if provider is copilot and warn user
-  if merged.auto_suggestions_provider == "copilot" then
-    Utils.warn(
-      "Warning: Copilot is not recommended as the default auto suggestion provider. Because: https://github.com/yetone/avante.nvim/issues/1048"
-    )
-  end
 
   M._options = merged
   M.providers = vim

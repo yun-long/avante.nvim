@@ -23,7 +23,7 @@ local group = api.nvim_create_augroup("avante_llm", { clear = true })
 M.generate_prompts = function(opts)
   local Provider = opts.provider or P[Config.provider]
   local mode = opts.mode or "planning"
-  ---@type AvanteProviderFunctor
+  ---@type AvanteProviderFunctor | AvanteBedrockProviderFunctor
   local _, body_opts = P.parse_config(Provider)
   local max_tokens = body_opts.max_tokens or 4096
 
@@ -139,6 +139,8 @@ M._stream = function(opts)
   ---@type AvanteCurlOutput
   local spec = Provider.parse_curl_args(Provider, code_opts)
 
+  local resp_ctx = {}
+
   ---@param line string
   local function parse_stream_data(line)
     local event = line:match("^event: (.+)$")
@@ -147,7 +149,7 @@ M._stream = function(opts)
       return
     end
     local data_match = line:match("^data: (.+)$")
-    if data_match then Provider.parse_response(data_match, current_event_state, handler_opts) end
+    if data_match then Provider.parse_response(resp_ctx, data_match, current_event_state, handler_opts) end
   end
 
   local function parse_response_without_stream(data)
@@ -378,7 +380,7 @@ end
 ---@field ask boolean
 ---@field instructions string
 ---@field mode LlmMode
----@field provider AvanteProviderFunctor | nil
+---@field provider AvanteProviderFunctor | AvanteBedrockProviderFunctor | nil
 ---
 ---@class StreamOptions: GeneratePromptsOptions
 ---@field on_chunk AvanteChunkParser
